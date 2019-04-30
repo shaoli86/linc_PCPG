@@ -1,0 +1,2 @@
+Gene1	Gene2	SurvPval
+Pseudohypoxia	RP1-56K13.5	0.0802867173054231
