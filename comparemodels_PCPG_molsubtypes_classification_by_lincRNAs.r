@@ -1,8 +1,10 @@
+#load clinical data
 clin <- read.table("TCGA_PCPG_clinical_molSubtype.txt", sep="\t", header=TRUE, stringsAsFactors=FALSE)
 for(i in 1:nrow(clin)){
 alls <- unlist(strsplit(clin[i,1],"-"))
 clin[i,1] <- paste(alls[1],alls[2],alls[3],alls[4],sep=".")
 }
+#molecular subtypes
 clinpseudo <- subset(clin, mRNA.Subtype.Clusters=="Pseudohypoxia")
 clincortical <- subset(clin, mRNA.Subtype.Clusters=="Cortical admixture")
 clinwnt <- subset(clin, mRNA.Subtype.Clusters=="Wnt-altered")
@@ -11,7 +13,7 @@ clinsdhb <- subset(clin, !is.na(SDHB.Germline.Mutation))
 clinsdhd <- subset(clin, !is.na(SDHD.Germline.Mutation))
 clinsdhx <- unique(c(clinsdhb[,1],clinsdhd[,1]))
 clin <- subset(clin, mRNA.Subtype.Clusters=="Pseudohypoxia" | mRNA.Subtype.Clusters=="Cortical admixture" | mRNA.Subtype.Clusters=="Wnt-altered" | mRNA.Subtype.Clusters=="Kinase signaling" | (!is.na(SDHB.Germline.Mutation)) | (!is.na(SDHD.Germline.Mutation)), select=c("SampleID","mRNA.Subtype.Clusters","Clinically.Aggressive.and.or.Metastatic"))
-
+#logCPM normalize lincRNA RNA-seq count expression
 linc <- read.table("gencode22_lincRNA_GeneID.txt", sep="\t", stringsAsFactors=FALSE)
 pcpg <- read.table("PCPG_GDC_CountData_normal_nr.txt", sep="\t", header=TRUE, stringsAsFactors=FALSE)
 pcpg <- na.omit(pcpg)
@@ -59,18 +61,14 @@ y <- edgeR::calcNormFactors(y, na.rm=TRUE)
 design <- model.matrix(~group)
 y <- edgeR::estimateDisp(y, design)
 logcpm <- edgeR::cpm(y, prior.count=2, log=TRUE)
-#dataexp <- pcpglinc
-#dataexp <- log2(dataexp + 1)
 dataexp <- t(scale(t(logcpm)))
 dataexp <- as.matrix(t(dataexp))
-
+#join clinical and lincRNA expression data
 dataexp <- data.frame(SampleID=rownames(dataexp), as.matrix(dataexp))
-
 clindataexp <- dplyr::inner_join(clin,dataexp)
 clindataexp <- within(clindataexp, mRNA.Subtype.Clusters[SampleID %in% ssdhx] <- "SDHX_mutated")
 rownames(clindataexp) <- clindataexp[,1]
 clindataexp <- clindataexp[,-1]
-
 clindataexp <- within(clindataexp, mRNA.Subtype.Clusters[mRNA.Subtype.Clusters == "SDHX_mutated"] <- 1)
 clindataexp <- within(clindataexp, mRNA.Subtype.Clusters[mRNA.Subtype.Clusters == "Pseudohypoxia"] <- 2)
 clindataexp <- within(clindataexp, mRNA.Subtype.Clusters[mRNA.Subtype.Clusters == "Wnt-altered"] <- 3)
@@ -79,9 +77,8 @@ clindataexp <- within(clindataexp, mRNA.Subtype.Clusters[mRNA.Subtype.Clusters =
 clindataexp <- within(clindataexp, Clinically.Aggressive.and.or.Metastatic[Clinically.Aggressive.and.or.Metastatic == "Yes"] <- 1)
 clindataexp <- within(clindataexp, Clinically.Aggressive.and.or.Metastatic[Clinically.Aggressive.and.or.Metastatic == "No"] <- 0)
 clindataexp <- within(clindataexp, Clinically.Aggressive.and.or.Metastatic[Clinically.Aggressive.and.or.Metastatic == "no"] <- 0)
-
 clindataexp <- clindataexp[,-2]
-
+#Test four different models for classification of molecular subtypes
 #CART
 library(rpart)
 set.seed(2017)
@@ -99,7 +96,6 @@ text(fit, use.n=TRUE, all=TRUE, cex=.8)
 
 library(glmnet)
 library(pROC)
-#clindataexp <- na.omit(clindataexp)
 clindataexp[is.na(clindataexp)] <- 0
 set.seed(2017)
 n <- nrow(clindataexp)
@@ -118,13 +114,12 @@ cv3 <- search[search$cvm == min(search$cvm), ]
 md3 <- glmnet(as.matrix(trainexp[,2:ncol(trainexp)]), as.numeric(trainexp[,1]), family = "gaussian", lambda = cv3$lambda.1se, alpha = cv3$alpha) #lambda=0.7884815, alpha=0.15
 pathselect <- coef(md3)
 pathpar <- as.matrix(pathselect)
-write.table(pathpar, "C:\\Users\\dass8\\Documents\\NCI\\pacak\\lncRNA_PCPG_ElNet_MolSubtypes_countData.txt", sep="\t", quote=FALSE)
 elnetroc <- multiclass.roc(as.numeric(testexp[,1]), as.numeric(predict(md3, as.matrix(testexp[,2:ncol(testexp)]), type = "response")))
 elnetauc <- elnetroc$auc #elnetauc=0.9674
 
 lincselect <- rownames(subset(as.data.frame(pathpar), s0!=0))
 lincselect <- lincselect[-1]
-write.table(lincselect, "SelectedlncRNA_PCPG_ElNet_MolSubtypes_countData.txt", sep="\t", quote=FALSE)
+write.table(lincselect, "lncRNA_PCPG_ElNet_MolSubtypes_countData.txt", sep="\t", quote=FALSE)
 
 #Ridge 
 #Optimize lambda hyperparameter by 10-fold cross-validation
